@@ -7,7 +7,7 @@ A high-performance Tampermonkey UserScript that displays triangle counts (tris) 
 
 <!-- GIF ALANI BAŞLANGICI -->
 <p align="center">
-  <img src="![ezgif com-animated-gif-maker](https://github.com/user-attachments/assets/c0e1c500-0933-4998-8629-bc702a41b55d)" alt="Script Demo Animation" width="100%">
+  <img src="https://github.com/user-attachments/assets/c0e1c500-0933-4998-8629-bc702a41b55d" alt="Script Demo Animation" width="100%">
 </p>
 <!-- GIF ALANI BİTİŞİ -->
 
