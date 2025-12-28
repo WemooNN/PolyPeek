@@ -5,6 +5,12 @@ A high-performance Tampermonkey UserScript that displays triangle counts (tris) 
 > **Why this script?**
 > Sketchfab doesn't show model weight/complexity on the search page. This script adds that info instantly, helping you find optimized models faster.
 
+<!-- GIF ALANI BAŞLANGICI -->
+<p align="center">
+  <img src="![ezgif com-animated-gif-maker](https://github.com/user-attachments/assets/c0e1c500-0933-4998-8629-bc702a41b55d)" alt="Script Demo Animation" width="100%">
+</p>
+<!-- GIF ALANI BİTİŞİ -->
+
 ## Features 🚀
 
 - **🛡️ Anti-Ban System:** Uses a smart queue to prevent IP bans.
