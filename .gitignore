@@ -1,0 +1,10 @@
+# Build output
+*.zip
+*.crx
+*.pem
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
