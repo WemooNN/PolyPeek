@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <a href="https://chromewebstore.google.com/detail/polypeek-%E2%80%93-triangle-count/paghbdjlncglfcahecfblfklcmmohcoh"><img alt="Get it on the Chrome Web Store" src="https://img.shields.io/badge/Chrome%20Web%20Store-Add%20to%20Chrome-8b5cf6?style=for-the-badge&logo=googlechrome&logoColor=white"></a>
+</p>
+
+<p align="center">
   <img alt="Manifest V3" src="https://img.shields.io/badge/Manifest-V3-8b5cf6">
   <img alt="Chrome & Edge" src="https://img.shields.io/badge/Chrome%20%7C%20Edge-111%2B-34d399">
   <img alt="No tracking" src="https://img.shields.io/badge/tracking-none-ec4899">
@@ -52,8 +56,10 @@ Models marked as AI-generated get a small **AI** badge, so you can recognize the
 
 ## Installation
 
-### Chrome Web Store
-PolyPeek is currently **in review** on the Chrome Web Store. The link will be added here once it's published.
+### Chrome Web Store (recommended)
+Install PolyPeek from the **[Chrome Web Store](https://chromewebstore.google.com/detail/polypeek-%E2%80%93-triangle-count/paghbdjlncglfcahecfblfklcmmohcoh)**. It also works in Microsoft Edge (allow extensions from other stores when prompted).
+
+> **"Proceed with caution" warning?** If you use Chrome's Enhanced Safe Browsing, you may see a warning that the extension isn't trusted yet. Chrome shows this for every extension from a new publisher; it goes away once the publisher has been in good standing for a few months. PolyPeek's full source code is in this repository, so you can check exactly what it does.
 
 ### Manual install (Chrome / Edge)
 1. [Download this repository](../../archive/refs/heads/main.zip) and unzip it.
