@@ -43,8 +43,8 @@ Hover a card to also see its vertex count.
 Two new options in Sketchfab's **Sort by** menu: **Tris: Low → High** and **Tris: High → Low**.
 Broken models with 0 triangles are filtered out automatically when sorting from low to high.
 
-### 🚫 Hide AI
-A **Hide AI** checkbox next to Sketchfab's own filters removes AI-generated models from search results.
+### 🚫 Hide AI & spam
+A **Hide AI & spam** checkbox next to Sketchfab's own filters removes AI-generated models and download spam from search results (details below).
 If hiding them leaves the page nearly empty, PolyPeek loads more results automatically.
 
 <img src="docs/images/screenshot-2-sort-hide-ai.png" alt="Sort by triangles and Hide AI filter" width="100%">
@@ -63,7 +63,13 @@ Most AI uploads never tick that box, so PolyPeek also **guesses**: models whose 
 
 Photogrammetry scans share some of these traits, so scan keywords, multi-material models and 4K+ textures count against a flag. The guess is deliberately cautious: it would rather miss an AI model than mislabel a hand-made one.
 
-The **Hide AI** checkbox hides both kinds: declared and suspected.
+### 🚯 Spam badge
+Sketchfab search is flooded with fake "models" that are really piracy ads ("Download Super Mario Odyssey Switch NSP XCI"). PolyPeek flags them with a **SPAM** badge, based on piracy keywords in the title (NSP, XCI, APK, torrent, crack…), titles starting with "Download", download pitches in the description and auto-generated usernames like `SwiftScales3533`.
+
+### Hide AI & spam
+The **Hide AI & spam** checkbox hides all of the above: declared AI, suspected AI and spam.
+
+While it's on, cards stay invisible until they've been checked and are then revealed **top to bottom, in order**. Filtered cards never appear, and cards already on screen never jump.
 
 <img src="docs/images/screenshot-3-ai-badge.png" alt="AI badge on AI-generated models" width="100%">
 
@@ -86,14 +92,14 @@ Install PolyPeek from the **[Chrome Web Store](https://chromewebstore.google.com
 | File | Purpose |
 |---|---|
 | [`extension/content.js`](extension/content.js) | Adds triangle and AI badges to model cards |
-| [`extension/search-ui.js`](extension/search-ui.js) | Adds the sort options, the Hide AI checkbox and auto "load more" |
+| [`extension/search-ui.js`](extension/search-ui.js) | Adds the sort options, the Hide AI & spam checkbox and auto "load more" |
 | [`extension/search-patch.js`](extension/search-patch.js) | Adjusts Sketchfab's own search requests (runs in the page context) |
 
 - Triangle count, vertex count and the AI flag come from Sketchfab's model endpoint (`sketchfab.com/i/models/{uid}`). No API token is needed.
 - Requests are only made for cards on or near the screen, at most 6 at a time, newest first (so fast scrolling doesn't queue up cards you've already passed), with automatic retry on rate limits.
 - Results are cached in your browser for 7 days. The cache stores raw signals, so detection rules can improve without refetching everything.
 - Sorting uses Sketchfab's own `sort_by=faceCount` / `-faceCount` search parameters.
-- **Hide AI** removes declared AI models (`isAiGenerated: true`) from search responses before the page renders them, since Sketchfab has no server-side AI filter. Suspected ones are hidden from the grid once their details arrive, and more results load automatically so the page doesn't end up half empty.
+- **Hide AI & spam** removes declared AI models (`isAiGenerated: true`) from search responses before the page renders them, since Sketchfab has no server-side AI filter. Every other card is checked before it's shown (requests go top to bottom in this mode), and more results load automatically so the page doesn't end up half empty.
 
 > PolyPeek relies on Sketchfab's internal web endpoints, not a documented public API. If Sketchfab changes its site, some features may stop working until PolyPeek is updated. Please [open an issue](../../issues) if you notice something broken.
 

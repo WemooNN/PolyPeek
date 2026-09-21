@@ -89,8 +89,8 @@
     if (!content || content.querySelector('#sf-hide-ai')) return;
 
     content.insertBefore(makeCheckbox(
-      'sf-hide-ai', 'Hide AI',
-      'Hide AI-generated models: both the ones marked by their uploader and the ones PolyPeek detects from their technical data',
+      'sf-hide-ai', 'Hide AI & spam',
+      'Hide AI-generated models (declared by the uploader or detected by PolyPeek) and download/piracy spam',
       HIDE_AI_KEY, getHideAI()), content.querySelector('.c-filters__filter.--button')); // "Reset"ten önce
   }
 

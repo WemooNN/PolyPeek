@@ -90,7 +90,16 @@
     .sf-ai-guess .sf-ico { color: #c4b5fd; }
     .sf-ai-guess .sf-ai-text { color: #ddd6fe; }
 
-    /* Hide AI: kartı ızgaradan çıkar (React'in düğümünü silmeden) */
+    /* Spam rozeti */
+    .sf-spam {
+      color: #fecaca; font-weight: 700; letter-spacing: .4px;
+      background: rgba(60, 10, 14, .9);
+      border: 1px dashed rgba(248, 113, 113, .85);
+    }
+
+    /* Hide AI & spam: kontrol edilmemiş ve elenmiş kartlar görünmez
+       (React'in düğümlerini silmeden, sadece CSS ile) */
+    .sf-hide-mode .sf-pending,
     .sf-hidden { display: none !important; }
   `;
   document.head.appendChild(style);
@@ -112,24 +121,41 @@
     300e3, 400e3, 500e3, 600e3, 750e3, 800e3, 1e6, 1.2e6, 1.5e6, 2e6, 2.5e6, 3e6];
   const AI_SCORE_MIN = 6;
 
+  // Korsan oyun/uygulama indirme spam'i ("Download Super Mario Odyssey Switch NSP XCI")
+  const SPAM_TITLE = /\b(nsp|xci|apk|torrent|crack(ed)?|keygen|repack|fitgirl|serial key|activation key)\b/i;
+  const SPAM_TITLE_WEAK = /\b(iso|rom|full game|free pc)\b/i; // tek başına yetmez
+  const SPAM_DESC = /\b(download|nsp|xci|apk|torrent|pc game|switch game|official (or authorized )?sources)\b/i;
+  const BOT_USERNAME = /^[A-Z][a-z]+[A-Z][a-z]+\d{3,4}$/; // SwiftScales3533 gibi otomatik isimler
+
+  const SIG_VERSION = 2; // signals() yeni alan eklerse artır -> eski kayıtlar yeniden çekilir
+
   // /i/models yanıtından sadece tahmin için gereken sinyaller
   function signals(j) {
     const md = j.metadata || {};
     const tex = md.textureFiles || [];
     const text = [j.name, j.description, (j.tags || []).map((t) => t.name || t).join(' ')].join(' ').toLowerCase();
+    const name = j.name || '';
+    let spam = 0;
+    if (SPAM_TITLE.test(name)) spam += 3;
+    if (SPAM_TITLE_WEAK.test(name)) spam += 1;
+    if (/^\s*download\b/i.test(name)) spam += 2;
+    if (SPAM_DESC.test(j.description || '')) spam += 1;
+    if (BOT_USERNAME.test((j.user && j.user.username) || '')) spam += 1;
     return {
+      v: SIG_VERSION,
       mat: md.materialCount, quad: md.quad, poly: md.polygon, tc: md.textureCount,
       tn: tex.slice(0, 4).map((t) => (t.filepath || '').split('/').pop()),
       tw: tex.reduce((m, t) => Math.max(m, t.width || 0), 0),
       kw: AI_WORDS.test(text), scan: SCAN_WORDS.test(text),
+      spam: spam >= 3,
     };
   }
 
   function nearTargetCount(f) {
     if (f < 10e3) return false;
-    if (TARGET_COUNTS.some((c) => f <= c && f >= c * 0.9975)) return true; // hedefin %0,25 altı
+    if (TARGET_COUNTS.some((c) => Math.abs(f - c) <= c * 0.0025)) return true; // hedefin ±%0,25'i
     const r = f % 1000;
-    return r === 0 || r >= 990;                                          // 48.999, 30.000 gibi
+    return r === 0 || r >= 990;                                                // 48.999, 30.000 gibi
   }
 
   function aiGuess(d) {
@@ -171,7 +197,14 @@
     return 'ultra';
   }
 
-  function render(card, wrap, data) {
+  // Model gizlenmeli mi? (Hide AI & spam açıkken)
+  function verdict(data) {
+    if (!data || data.faces == null) return { bad: false, g: { guess: false, reasons: [] } };
+    const g = data.ai ? { guess: false, reasons: [] } : aiGuess(data);
+    return { bad: data.ai || g.guess || !!(data.sig && data.sig.spam), g };
+  }
+
+  function render(wrap, data) {
     const tri = wrap.querySelector('.sf-tri');
     tri.classList.remove('loading');
     if (!data || data.faces == null) {
@@ -179,13 +212,7 @@
       tri.title = 'Üçgen sayısı alınamadı';
       return;
     }
-
-    const g = data.ai ? { guess: false, reasons: [] } : aiGuess(data);
-    if ((data.ai || g.guess) && hideAI()) {
-      (card.closest('.c-grid__item') || card).classList.add('sf-hidden');
-      document.dispatchEvent(new CustomEvent('sf-card-hidden'));
-      return;
-    }
+    const { g } = verdict(data);
 
     tri.classList.add(levelClass(data.faces));
     tri.innerHTML =
@@ -206,18 +233,27 @@
       ai.innerHTML = AI_SVG + `<span class="sf-ai-text">AI${data.ai ? '' : '?'}</span>`;
       wrap.appendChild(ai);
     }
+    if (data.sig && data.sig.spam && !wrap.querySelector('.sf-spam')) {
+      const sp = document.createElement('span');
+      sp.className = 'sf-chip sf-spam';
+      sp.title = 'Looks like download/piracy spam, not a real 3D model';
+      sp.textContent = 'SPAM';
+      wrap.appendChild(sp);
+    }
   }
 
   // ---- İstek kuyruğu ----
-  // LIFO: en son ekrana giren kart önce yüklenir; hızlı kaydırınca geride
-  // kalan kartlar ekrandakileri bekletmez.
+  // Normal mod: LIFO, en son ekrana giren kart önce yüklenir (hızlı kaydırmada
+  // geride kalan kartlar ekrandakileri bekletmez).
+  // Gizleme modu: FIFO, kartlar yukarıdan aşağıya sırayla açılır.
+  const HIDE = hideAI();
   const queue = [];
   const pending = new Map(); // uid -> Promise
   let active = 0;
 
   function fetchInfo(uid) {
     const c = cache[uid];
-    if (c && c.sig && Date.now() - c.t < CACHE_TTL) return Promise.resolve(c);
+    if (c && c.sig && c.sig.v === SIG_VERSION && Date.now() - c.t < CACHE_TTL) return Promise.resolve(c);
     if (pending.has(uid)) return pending.get(uid);
     const p = new Promise((resolve) => { queue.push({ uid, resolve, tries: 0 }); pump(); });
     pending.set(uid, p);
@@ -227,7 +263,7 @@
 
   function pump() {
     while (active < MAX_CONCURRENT && queue.length) {
-      const job = queue.pop();
+      const job = HIDE ? queue.shift() : queue.pop();
       active++;
       fetch(`/i/models/${job.uid}`, { credentials: 'include' })
         .then((r) => {
@@ -244,7 +280,7 @@
         .catch((err) => {
           if (err.retry && job.tries < 3) {
             job.tries++;
-            setTimeout(() => { queue.unshift(job); pump(); }, 2000 * job.tries);
+            setTimeout(() => { HIDE ? queue.unshift(job) : queue.push(job); pump(); }, 2000 * job.tries);
           } else {
             job.resolve(null);
           }
@@ -253,6 +289,28 @@
     }
   }
 
+  // ---- Gizleme modu: sıralı açılış ----
+  // Kartlar kontrol edilene kadar görünmez (sf-pending). Sonuçlar gelince DOM
+  // sırasıyla açılır: AI/spam olanlar hiç görünmez, ekrandaki kartlar hiç kaymaz.
+  const REVEAL_TIMEOUT = 8000;
+  const revealList = [];
+  function flushReveal() {
+    let hidden = false;
+    while (revealList.length && revealList[0].done) {
+      const e = revealList.shift();
+      if (verdict(e.data).bad) {
+        e.item.classList.add('sf-hidden');
+        hidden = true;
+      } else if (!e.timedOut) {
+        render(e.wrap, e.data);
+      }
+      e.item.classList.remove('sf-pending');
+    }
+    if (hidden) document.dispatchEvent(new CustomEvent('sf-card-hidden'));
+  }
+
+  if (HIDE) document.documentElement.classList.add('sf-hide-mode');
+
   // ---- Kartları işleme ----
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) {
@@ -260,7 +318,7 @@
       io.unobserve(e.target);
       const card = e.target;
       const wrap = card.querySelector('.sf-chips');
-      fetchInfo(card.dataset.uid).then((d) => render(card, wrap, d));
+      fetchInfo(card.dataset.uid).then((d) => render(wrap, d));
     }
   }, { rootMargin: '600px 0px' });
 
@@ -273,7 +331,21 @@
     wrap.className = 'sf-chips';
     wrap.innerHTML = '<span class="sf-chip sf-tri loading"></span>';
     thumb.appendChild(wrap);
-    io.observe(card);
+
+    if (!HIDE) { io.observe(card); return; }
+
+    const item = card.closest('.c-grid__item') || card;
+    item.classList.add('sf-pending');
+    const entry = { item, wrap, done: false, data: null, timedOut: false };
+    revealList.push(entry);
+    const finish = (d) => { if (entry.done) return; entry.done = true; entry.data = d; flushReveal(); };
+    // Takılan istek sırayı kilitlemesin: süre dolunca kartı aç, veri gelince rozeti doldur
+    setTimeout(() => { if (!entry.done) { entry.timedOut = true; finish(undefined); } }, REVEAL_TIMEOUT);
+    fetchInfo(card.dataset.uid).then((d) => {
+      if (!entry.timedOut) return finish(d);
+      if (verdict(d).bad) { item.classList.add('sf-hidden'); document.dispatchEvent(new CustomEvent('sf-card-hidden')); }
+      else render(wrap, d);
+    });
   }
 
   function scan() {
