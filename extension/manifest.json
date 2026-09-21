@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "PolyPeek – Triangle Count & AI Filter for Sketchfab",
   "short_name": "PolyPeek",
-  "version": "1.3.0",
-  "description": "See triangle counts on every Sketchfab model, sort search by tris, and hide AI-generated models and download spam.",
+  "version": "1.4.0",
+  "description": "See triangle counts on every Sketchfab model, sort search by tris, and spot or hide AI-generated models.",
   "minimum_chrome_version": "111",
   "icons": {
     "16": "icons/icon16.png",

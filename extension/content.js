@@ -1,31 +1,42 @@
 (() => {
   'use strict';
 
-  // Önbellek ham sinyalleri saklar; AI tahmini her gösterimde yeniden hesaplanır.
-  // Böylece tahmin kuralları değişince önbelleği sıfırlamak gerekmez.
+  // v4 kayıtları (faces/verts/ai) aynen kullanılabilir -> güncellemede önbellek sıfırlanmaz
   const CACHE_KEY = 'sfTriCache_v4';
-  const HIDE_AI_KEY = 'sfTri_hideAI';
   const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 gün
+  const CACHE_MAX = 3000;                    // localStorage yazımı küçük ve hızlı kalsın
   const MAX_CONCURRENT = 6;
 
   // ---- Önbellek (localStorage) ----
+  // Sadece gereken alanlar tutulur; süresi dolanlar ve fazlası açılışta atılır.
   let cache = {};
-  try { cache = JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (e) { cache = {}; }
+  try {
+    const raw = JSON.parse(localStorage.getItem(CACHE_KEY)) || {};
+    const now = Date.now();
+    const fresh = Object.entries(raw)
+      .filter(([, d]) => d && d.faces != null && now - d.t < CACHE_TTL)
+      .sort((a, b) => b[1].t - a[1].t)
+      .slice(0, CACHE_MAX);
+    for (const [uid, d] of fresh) cache[uid] = { faces: d.faces, verts: d.verts, ai: !!d.ai, t: d.t };
+  } catch (e) { cache = {}; }
   try {
     for (const k of ['sfTriCache_v1', 'sfTriCache_v2', 'sfTriCache_v3', 'sfTri_hideAIGuess']) localStorage.removeItem(k);
   } catch (e) { /* eski sürüm */ }
-  const hideAI = () => { try { return localStorage.getItem(HIDE_AI_KEY) === '1'; } catch (e) { return false; } };
+
   let saveTimer = null;
   function saveCache() {
-    clearTimeout(saveTimer);
+    if (saveTimer) return;
     saveTimer = setTimeout(() => {
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)); } catch (e) { /* dolu olabilir */ }
-    }, 1000);
+      saveTimer = null;
+      const write = () => { try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)); } catch (e) { /* dolu olabilir */ } };
+      // Kaydırma sırasında değil, tarayıcı boştayken yaz
+      (window.requestIdleCallback || ((f) => setTimeout(f, 0)))(write, { timeout: 5000 });
+    }, 3000);
   }
 
   // ---- Stil ----
-  // Performans: backdrop-filter / filter: drop-shadow kullanılmıyor. Onlarca rozetle
-  // birlikte her kaydırma karesinde yeniden çizim yaptırıp sayfayı kasıyorlardı.
+  // Performans: backdrop-filter / filter: drop-shadow yok (her kaydırma karesinde
+  // tüm rozetleri yeniden çizdiriyordu). Rozet arkası düz, yarı saydam koyu renk.
   const style = document.createElement('style');
   style.textContent = `
     .card-model__thumbnail.sf-rel { position: relative; }
@@ -72,7 +83,7 @@
     /* Yükleniyor */
     .sf-tri.loading { width: 58px; opacity: .55; animation: none; }
 
-    /* AI rozeti */
+    /* AI rozeti (yükleyenin işaretlediği modeller) */
     .sf-ai {
       border: 1px solid transparent;
       background:
@@ -81,108 +92,11 @@
     }
     .sf-ai .sf-ico { width: 12px; height: 12px; flex: none; color: #f0abfc; }
     .sf-ai .sf-ai-text { color: #fbe7ff; font-weight: 700; }
-
-    /* Tahmini AI: kesik çizgili */
-    .sf-ai-guess {
-      background: rgba(24, 14, 40, .9);
-      border: 1px dashed rgba(196, 181, 253, .8);
-    }
-    .sf-ai-guess .sf-ico { color: #c4b5fd; }
-    .sf-ai-guess .sf-ai-text { color: #ddd6fe; }
-
-    /* Spam rozeti */
-    .sf-spam {
-      color: #fecaca; font-weight: 700; letter-spacing: .4px;
-      background: rgba(60, 10, 14, .9);
-      border: 1px dashed rgba(248, 113, 113, .85);
-    }
-
-    /* Hide AI & spam: kontrol edilmemiş ve elenmiş kartlar görünmez
-       (React'in düğümlerini silmeden, sadece CSS ile) */
-    .sf-hide-mode .sf-pending,
-    .sf-hidden { display: none !important; }
   `;
   document.head.appendChild(style);
 
   const TRI_SVG = '<svg class="sf-ico" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 11.2 10.5H.8Z" fill="currentColor"/></svg>';
   const AI_SVG = '<svg class="sf-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.3L20.5 10.5 14.2 12.7 12 19l-2.2-6.3L3.5 10.5l6.3-2.2zM19 15l.9 2.6 2.6.9-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9z"/></svg>';
-
-  // ---- AI tahmini ----
-  // Yükleyenlerin çoğu "AI generated" kutusunu işaretlemiyor. AI araçlarının
-  // (Meshy, Tripo, Hunyuan…) çıktısında ortak bir iz var: tek malzeme, genel doku
-  // isimleri, su geçirmez mesh (üçgen/vertex ≈ 2.00) ve kullanıcının seçtiği hedef
-  // üçgen sayısının hemen altında bir değer (ör. 1.500.000, 499.972, 48.999).
-  const GENERIC_TEX = /^(texture|image|material)[ _-]?\d*(@|\.)/i;
-  const PBR_V_TEX = /texture_pbr_v\d+/i;
-  const EMBEDDED_TEX = /gltf_embedded_\d+/i;
-  const AI_WORDS = /\b(meshy|tripo|tripo3d|hunyuan|trellis|rodin|kaedim|sloyd|csm\.ai|text[- ]to[- ]3d|image[- ]to[- ]3d|ai[- ]?generated|ai[- ]?made|aigc|midjourney)\b/;
-  const SCAN_WORDS = /\b(photogrammetry|photoscan|scan(ned|ning)?|lidar|agisoft|metashape|realitycapture|polycam|drone)\b/;
-  const TARGET_COUNTS = [10e3, 20e3, 25e3, 30e3, 40e3, 50e3, 60e3, 75e3, 80e3, 100e3, 150e3, 200e3, 250e3,
-    300e3, 400e3, 500e3, 600e3, 750e3, 800e3, 1e6, 1.2e6, 1.5e6, 2e6, 2.5e6, 3e6];
-  const AI_SCORE_MIN = 6;
-
-  // Korsan oyun/uygulama indirme spam'i ("Download Super Mario Odyssey Switch NSP XCI")
-  const SPAM_TITLE = /\b(nsp|xci|apk|torrent|crack(ed)?|keygen|repack|fitgirl|serial key|activation key)\b/i;
-  const SPAM_TITLE_WEAK = /\b(iso|rom|full game|free pc)\b/i; // tek başına yetmez
-  const SPAM_DESC = /\b(download|nsp|xci|apk|torrent|pc game|switch game|official (or authorized )?sources)\b/i;
-  const BOT_USERNAME = /^[A-Z][a-z]+[A-Z][a-z]+\d{3,4}$/; // SwiftScales3533 gibi otomatik isimler
-
-  const SIG_VERSION = 2; // signals() yeni alan eklerse artır -> eski kayıtlar yeniden çekilir
-
-  // /i/models yanıtından sadece tahmin için gereken sinyaller
-  function signals(j) {
-    const md = j.metadata || {};
-    const tex = md.textureFiles || [];
-    const text = [j.name, j.description, (j.tags || []).map((t) => t.name || t).join(' ')].join(' ').toLowerCase();
-    const name = j.name || '';
-    let spam = 0;
-    if (SPAM_TITLE.test(name)) spam += 3;
-    if (SPAM_TITLE_WEAK.test(name)) spam += 1;
-    if (/^\s*download\b/i.test(name)) spam += 2;
-    if (SPAM_DESC.test(j.description || '')) spam += 1;
-    if (BOT_USERNAME.test((j.user && j.user.username) || '')) spam += 1;
-    return {
-      v: SIG_VERSION,
-      mat: md.materialCount, quad: md.quad, poly: md.polygon, tc: md.textureCount,
-      tn: tex.slice(0, 4).map((t) => (t.filepath || '').split('/').pop()),
-      tw: tex.reduce((m, t) => Math.max(m, t.width || 0), 0),
-      kw: AI_WORDS.test(text), scan: SCAN_WORDS.test(text),
-      spam: spam >= 3,
-    };
-  }
-
-  function nearTargetCount(f) {
-    if (f < 10e3) return false;
-    if (TARGET_COUNTS.some((c) => Math.abs(f - c) <= c * 0.0025)) return true; // hedefin ±%0,25'i
-    const r = f % 1000;
-    return r === 0 || r >= 990;                                                // 48.999, 30.000 gibi
-  }
-
-  function aiGuess(d) {
-    const s = d.sig;
-    if (!s) return { guess: false, reasons: [] };
-    const reasons = [];
-    let score = 0;
-    const ratio = d.verts ? d.faces / d.verts : 0;
-
-    if (s.tn.length && s.tn.every((n) => GENERIC_TEX.test(n) || PBR_V_TEX.test(n))) {
-      score += 3; reasons.push(`generic texture name (${s.tn[0]})`);
-    } else if (s.tn.some((n) => EMBEDDED_TEX.test(n))) {
-      score += 1; reasons.push('embedded glTF textures');
-    }
-    if (s.mat === 1) { score += 2; reasons.push('single material'); }
-    if (ratio > 1.995 && ratio < 2.005) { score += 2; reasons.push('watertight 2.00 tri/vertex ratio'); }
-    if (s.quad === 0 && s.poly === 0 && d.faces > 5000) { score += 1; reasons.push('triangles only'); }
-    if (nearTargetCount(d.faces)) { score += 2; reasons.push(`generator-style target count (${d.faces.toLocaleString('en-US')})`); }
-    if (s.kw) { score += 3; reasons.push('AI tool mentioned'); }
-
-    if (s.scan) score -= 3;             // fotogrametri taraması
-    if (s.mat >= 3) score -= 3;
-    if (s.tc >= 5) score -= 2;
-    if (s.tw >= 4096) score -= 1;       // tarama/AAA doku
-
-    return { guess: score >= AI_SCORE_MIN, reasons };
-  }
 
   // ---- Yardımcılar ----
   function formatCount(n) {
@@ -197,13 +111,6 @@
     return 'ultra';
   }
 
-  // Model gizlenmeli mi? (Hide AI & spam açıkken)
-  function verdict(data) {
-    if (!data || data.faces == null) return { bad: false, g: { guess: false, reasons: [] } };
-    const g = data.ai ? { guess: false, reasons: [] } : aiGuess(data);
-    return { bad: data.ai || g.guess || !!(data.sig && data.sig.spam), g };
-  }
-
   function render(wrap, data) {
     const tri = wrap.querySelector('.sf-tri');
     tri.classList.remove('loading');
@@ -212,8 +119,6 @@
       tri.title = 'Üçgen sayısı alınamadı';
       return;
     }
-    const { g } = verdict(data);
-
     tri.classList.add(levelClass(data.faces));
     tri.innerHTML =
       TRI_SVG +
@@ -224,36 +129,25 @@
       `Üçgen: ${data.faces.toLocaleString('tr-TR')}\n` +
       `Vertex: ${(data.verts ?? 0).toLocaleString('tr-TR')}`;
 
-    if ((data.ai || g.guess) && !wrap.querySelector('.sf-ai')) {
+    if (data.ai && !wrap.querySelector('.sf-ai')) {
       const ai = document.createElement('span');
-      ai.className = 'sf-chip sf-ai' + (data.ai ? '' : ' sf-ai-guess');
-      ai.title = data.ai
-        ? 'Marked as AI-generated by the uploader'
-        : 'Likely AI-generated (not declared by the uploader)\n· ' + g.reasons.join('\n· ');
-      ai.innerHTML = AI_SVG + `<span class="sf-ai-text">AI${data.ai ? '' : '?'}</span>`;
+      ai.className = 'sf-chip sf-ai';
+      ai.title = 'Marked as AI-generated by the uploader';
+      ai.innerHTML = AI_SVG + '<span class="sf-ai-text">AI</span>';
       wrap.appendChild(ai);
-    }
-    if (data.sig && data.sig.spam && !wrap.querySelector('.sf-spam')) {
-      const sp = document.createElement('span');
-      sp.className = 'sf-chip sf-spam';
-      sp.title = 'Looks like download/piracy spam, not a real 3D model';
-      sp.textContent = 'SPAM';
-      wrap.appendChild(sp);
     }
   }
 
   // ---- İstek kuyruğu ----
-  // Normal mod: LIFO, en son ekrana giren kart önce yüklenir (hızlı kaydırmada
-  // geride kalan kartlar ekrandakileri bekletmez).
-  // Gizleme modu: FIFO, kartlar yukarıdan aşağıya sırayla açılır.
-  const HIDE = hideAI();
+  // LIFO: en son ekrana giren kart önce yüklenir; hızlı kaydırınca geride
+  // kalan kartlar ekrandakileri bekletmez.
   const queue = [];
   const pending = new Map(); // uid -> Promise
   let active = 0;
 
   function fetchInfo(uid) {
     const c = cache[uid];
-    if (c && c.sig && c.sig.v === SIG_VERSION && Date.now() - c.t < CACHE_TTL) return Promise.resolve(c);
+    if (c) return Promise.resolve(c);
     if (pending.has(uid)) return pending.get(uid);
     const p = new Promise((resolve) => { queue.push({ uid, resolve, tries: 0 }); pump(); });
     pending.set(uid, p);
@@ -263,7 +157,7 @@
 
   function pump() {
     while (active < MAX_CONCURRENT && queue.length) {
-      const job = HIDE ? queue.shift() : queue.pop();
+      const job = queue.pop();
       active++;
       fetch(`/i/models/${job.uid}`, { credentials: 'include' })
         .then((r) => {
@@ -272,7 +166,7 @@
           return r.json();
         })
         .then((j) => {
-          const data = { faces: j.faceCount, verts: j.vertexCount, ai: !!j.isAiGenerated, sig: signals(j), t: Date.now() };
+          const data = { faces: j.faceCount, verts: j.vertexCount, ai: !!j.isAiGenerated, t: Date.now() };
           cache[job.uid] = data;
           saveCache();
           job.resolve(data);
@@ -280,7 +174,7 @@
         .catch((err) => {
           if (err.retry && job.tries < 3) {
             job.tries++;
-            setTimeout(() => { HIDE ? queue.unshift(job) : queue.push(job); pump(); }, 2000 * job.tries);
+            setTimeout(() => { queue.unshift(job); pump(); }, 2000 * job.tries);
           } else {
             job.resolve(null);
           }
@@ -289,36 +183,13 @@
     }
   }
 
-  // ---- Gizleme modu: sıralı açılış ----
-  // Kartlar kontrol edilene kadar görünmez (sf-pending). Sonuçlar gelince DOM
-  // sırasıyla açılır: AI/spam olanlar hiç görünmez, ekrandaki kartlar hiç kaymaz.
-  const REVEAL_TIMEOUT = 8000;
-  const revealList = [];
-  function flushReveal() {
-    let hidden = false;
-    while (revealList.length && revealList[0].done) {
-      const e = revealList.shift();
-      if (verdict(e.data).bad) {
-        e.item.classList.add('sf-hidden');
-        hidden = true;
-      } else if (!e.timedOut) {
-        render(e.wrap, e.data);
-      }
-      e.item.classList.remove('sf-pending');
-    }
-    if (hidden) document.dispatchEvent(new CustomEvent('sf-card-hidden'));
-  }
-
-  if (HIDE) document.documentElement.classList.add('sf-hide-mode');
-
   // ---- Kartları işleme ----
   const io = new IntersectionObserver((entries) => {
     for (const e of entries) {
       if (!e.isIntersecting) continue;
       io.unobserve(e.target);
-      const card = e.target;
-      const wrap = card.querySelector('.sf-chips');
-      fetchInfo(card.dataset.uid).then((d) => render(wrap, d));
+      const wrap = e.target.querySelector('.sf-chips');
+      fetchInfo(e.target.dataset.uid).then((d) => render(wrap, d));
     }
   }, { rootMargin: '600px 0px' });
 
@@ -331,21 +202,7 @@
     wrap.className = 'sf-chips';
     wrap.innerHTML = '<span class="sf-chip sf-tri loading"></span>';
     thumb.appendChild(wrap);
-
-    if (!HIDE) { io.observe(card); return; }
-
-    const item = card.closest('.c-grid__item') || card;
-    item.classList.add('sf-pending');
-    const entry = { item, wrap, done: false, data: null, timedOut: false };
-    revealList.push(entry);
-    const finish = (d) => { if (entry.done) return; entry.done = true; entry.data = d; flushReveal(); };
-    // Takılan istek sırayı kilitlemesin: süre dolunca kartı aç, veri gelince rozeti doldur
-    setTimeout(() => { if (!entry.done) { entry.timedOut = true; finish(undefined); } }, REVEAL_TIMEOUT);
-    fetchInfo(card.dataset.uid).then((d) => {
-      if (!entry.timedOut) return finish(d);
-      if (verdict(d).bad) { item.classList.add('sf-hidden'); document.dispatchEvent(new CustomEvent('sf-card-hidden')); }
-      else render(wrap, d);
-    });
+    io.observe(card);
   }
 
   function scan() {
