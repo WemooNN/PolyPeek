@@ -58,11 +58,12 @@ Most AI uploads never tick that box, so PolyPeek also **guesses**: models whose 
 - a single material for the whole model
 - a watertight mesh with an exact 2.00 triangle/vertex ratio
 - triangles only, no quads
+- a triangle count just under a round target, the way generators output it (e.g. `1,500,000`, `499,972`, `48,999`)
 - an AI tool named in the title, description or tags
 
 Photogrammetry scans share some of these traits, so scan keywords, multi-material models and 4K+ textures count against a flag. The guess is deliberately cautious: it would rather miss an AI model than mislabel a hand-made one.
 
-A second checkbox, **Hide AI?**, also hides the suspected ones.
+The **Hide AI** checkbox hides both kinds: declared and suspected.
 
 <img src="docs/images/screenshot-3-ai-badge.png" alt="AI badge on AI-generated models" width="100%">
 
@@ -89,11 +90,10 @@ Install PolyPeek from the **[Chrome Web Store](https://chromewebstore.google.com
 | [`extension/search-patch.js`](extension/search-patch.js) | Adjusts Sketchfab's own search requests (runs in the page context) |
 
 - Triangle count, vertex count and the AI flag come from Sketchfab's model endpoint (`sketchfab.com/i/models/{uid}`). No API token is needed.
-- Requests are only made for cards that are visible on screen, with at most 4 at a time and automatic retry on rate limits.
-- Results are cached in your browser for 7 days.
+- Requests are only made for cards on or near the screen, at most 6 at a time, newest first (so fast scrolling doesn't queue up cards you've already passed), with automatic retry on rate limits.
+- Results are cached in your browser for 7 days. The cache stores raw signals, so detection rules can improve without refetching everything.
 - Sorting uses Sketchfab's own `sort_by=faceCount` / `-faceCount` search parameters.
-- **Hide AI** removes models with `isAiGenerated: true` from search responses before the page renders them, since Sketchfab has no server-side AI filter.
-- **Hide AI?** removes a suspected card from the grid after its details arrive, and keeps loading more results so the page doesn't end up half empty.
+- **Hide AI** removes declared AI models (`isAiGenerated: true`) from search responses before the page renders them, since Sketchfab has no server-side AI filter. Suspected ones are hidden from the grid once their details arrive, and more results load automatically so the page doesn't end up half empty.
 
 > PolyPeek relies on Sketchfab's internal web endpoints, not a documented public API. If Sketchfab changes its site, some features may stop working until PolyPeek is updated. Please [open an issue](../../issues) if you notice something broken.
 

@@ -9,7 +9,6 @@
     { sort: '-faceCount', label: 'Tris: High → Low' },
   ];
   const HIDE_AI_KEY = 'sfTri_hideAI';
-  const HIDE_GUESS_KEY = 'sfTri_hideAIGuess';
 
   const style = document.createElement('style');
   style.textContent = `.c-dropdown-select__option.sf-tri-sort-option { cursor: pointer; }`;
@@ -18,7 +17,6 @@
   const isSearchPage = () => location.pathname.startsWith('/search');
   const currentSort = () => new URLSearchParams(location.search).get('sort_by');
   const getHideAI = () => { try { return localStorage.getItem(HIDE_AI_KEY) === '1'; } catch (e) { return false; } };
-  const getHideGuess = () => { try { return localStorage.getItem(HIDE_GUESS_KEY) === '1'; } catch (e) { return false; } };
 
   function findSortDropdown() {
     return [...document.querySelectorAll('.c-dropdown')].find((d) => {
@@ -90,15 +88,10 @@
     const content = group && group.querySelector('.c-filter-group__content');
     if (!content || content.querySelector('#sf-hide-ai')) return;
 
-    const before = content.querySelector('.c-filters__filter.--button'); // "Reset" bağlantısı
     content.insertBefore(makeCheckbox(
       'sf-hide-ai', 'Hide AI',
-      'Yükleyenin "AI generated" olarak işaretlediği modelleri gizle',
-      HIDE_AI_KEY, getHideAI()), before);
-    content.insertBefore(makeCheckbox(
-      'sf-hide-ai-guess', 'Hide AI?',
-      'Teknik verisine bakarak AI olduğunu tahmin ettiğimiz modelleri de gizle (işaretlenmemiş olanlar)',
-      HIDE_GUESS_KEY, getHideGuess()), before);
+      'Hide AI-generated models: both the ones marked by their uploader and the ones PolyPeek detects from their technical data',
+      HIDE_AI_KEY, getHideAI()), content.querySelector('.c-filters__filter.--button')); // "Reset"ten önce
   }
 
   // AI gizlenince bir sayfada çok az kart kalabiliyor; ekran dolana kadar "load more"a otomatik bas.
@@ -110,8 +103,9 @@
   let lastUrl = location.href;
   function autoLoadMore() {
     if (location.href !== lastUrl) { lastUrl = location.href; autoLoads = 0; }
-    if (!(getHideAI() || getHideGuess()) || autoLoads >= MAX_AUTO_LOADS) return;
-    if (document.querySelectorAll('.card-model[data-uid]').length >= MIN_CARDS) return;
+    if (!getHideAI() || autoLoads >= MAX_AUTO_LOADS) return;
+    const visible = document.querySelectorAll('.c-grid__item:not(.sf-hidden) .card-model[data-uid]').length;
+    if (visible >= MIN_CARDS) return;
     if (Date.now() - lastClick < COOLDOWN) return; // bekleyen zamanlayıcı tekrar çağıracak
     const btn = document.querySelector('.c-grid__button.--next button');
     if (!btn || btn.disabled) return;
@@ -134,6 +128,8 @@
     if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(() => { scheduled = false; update(); });
-  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  }).observe(document.body, { childList: true, subtree: true });
+  // content.js tahmini AI kartını gizleyince DOM'a düğüm eklenmez; ayrıca haber verir
+  document.addEventListener('sf-card-hidden', () => { if (isSearchPage()) autoLoadMore(); });
   update();
 })();
